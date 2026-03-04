@@ -2,7 +2,7 @@ import os
 from newsapi import NewsApiClient
 import csv
 from sqlmodel import Session
-from models import NewsItem
+from .models import NewsItem
 
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "")
 

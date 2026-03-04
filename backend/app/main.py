@@ -5,11 +5,11 @@ import os
 from datetime import date, datetime, timedelta
 import pandas as pd
 
-from models import Stock, PriceHistory, NewsItem
-from fetch_prices import fetch_and_store_prices
-from fetch_news import import_news_from_csv_or_api
-from sentiment import compute_sentiment_for_news
-from predict import generate_prediction_from_sentiment
+from .models import Stock, PriceHistory, NewsItem
+from .fetch_prices import fetch_and_store_prices
+from .fetch_news import import_news_from_csv_or_api
+from .sentiment import compute_sentiment_for_news
+from .predict import generate_prediction_from_sentiment
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data.db")
 engine = create_engine(DATABASE_URL, echo=False)

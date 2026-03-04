@@ -2,7 +2,7 @@ import yfinance as yf
 import pandas as pd
 from sqlmodel import Session
 from datetime import date, timedelta
-from models import PriceHistory, Stock
+from .models import PriceHistory, Stock
 
 def fetch_and_store_prices(code: str, period_days: int, engine):
     ticker = yf.Ticker(code)
