@@ -1,5 +1,5 @@
 from sqlmodel import Session, select
-from .models import PriceHistory, NewsItem
+from models import PriceHistory, NewsItem
 import pandas as pd
 from datetime import date, timedelta
 

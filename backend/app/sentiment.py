@@ -1,6 +1,6 @@
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from sqlmodel import Session, select
-from .models import NewsItem
+from models import NewsItem
 from datetime import datetime
 
 analyzer = SentimentIntensityAnalyzer()
