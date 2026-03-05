@@ -1,30 +1,47 @@
-from sqlmodel import SQLModel, Field
-from typing import Optional
-from datetime import date
+from datetime import datetime, date
+from sqlalchemy import (
+    Column, Integer, String, Date, DateTime, Float, BigInteger, ForeignKey, UniqueConstraint, Index
+)
+from sqlalchemy.orm import declarative_base, relationship
 
-class Stock(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    code: str
-    name: Optional[str] = None
-    market: Optional[str] = None
+Base = declarative_base()
 
-class PriceHistory(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    stock_code: str = Field(index=True)
-    date: date
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: Optional[float] = None
-    source: Optional[str] = None
+class Stock(Base):
+    __tablename__ = "stocks"
 
-class NewsItem(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    stock_code: str = Field(index=True)
-    title: str
-    url: Optional[str] = None
-    published_at: Optional[str] = None  # ISO date string
-    content: Optional[str] = None
-    source: Optional[str] = None
-    sentiment_score: Optional[float] = None
+    id = Column(Integer, primary_key=True, index=True)
+    ticker = Column(String(32), unique=True, nullable=False, index=True)  # e.g. AAPL, 600519.SS
+    name = Column(String(255), nullable=True)
+    exchange = Column(String(64), nullable=True)
+    currency = Column(String(16), nullable=True)
+    sector = Column(String(128), nullable=True)
+    industry = Column(String(128), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    price_history = relationship("PriceHistory", back_populates="stock", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<Stock(id={self.id} ticker={self.ticker} name={self.name})>"
+
+class PriceHistory(Base):
+    __tablename__ = "price_history"
+    __table_args__ = (
+        UniqueConstraint("stock_id", "date", name="uix_stock_date"),
+        Index("ix_price_history_date", "date"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    stock_id = Column(Integer, ForeignKey("stocks.id", ondelete="CASCADE"), nullable=False, index=True)
+    date = Column(Date, nullable=False)  # trading date (UTC)
+    open = Column(Float, nullable=True)
+    high = Column(Float, nullable=True)
+    low = Column(Float, nullable=True)
+    close = Column(Float, nullable=True)
+    adjusted_close = Column(Float, nullable=True)
+    volume = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    stock = relationship("Stock", back_populates="price_history")
+
+    def __repr__(self):
+        return f"<PriceHistory(stock_id={self.stock_id} date={self.date} close={self.close})>"
