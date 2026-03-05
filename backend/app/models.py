@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Optional, List
 from datetime import date, datetime
 from sqlmodel import SQLModel, Field, Relationship
@@ -12,12 +14,11 @@ class Stock(SQLModel, table=True):
     industry: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
-    # relationship to price rows (not strictly required for queries that use stock_code)
-    prices: List["PriceHistory"] = Relationship(back_populates="stock")
+    prices: Optional[List["PriceHistory"]] = Relationship(back_populates="stock")
+
 
 class PriceHistory(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    # optional FK to Stock.id (table name is 'stock' by default); keep a denormalized stock_code used by queries
     stock_id: Optional[int] = Field(default=None, foreign_key="stock.id")
     stock_code: str = Field(index=True, nullable=False, max_length=32)
     date: date = Field(index=True)
@@ -30,6 +31,7 @@ class PriceHistory(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     stock: Optional[Stock] = Relationship(back_populates="prices")
+
 
 class NewsItem(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
