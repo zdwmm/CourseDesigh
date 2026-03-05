@@ -41,7 +41,3 @@ class NewsItem(SQLModel, table=True):
     source: Optional[str] = None
     sentiment_score: Optional[float] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    stock = relationship("Stock", back_populates="price_history")
-
-    def __repr__(self):
-        return f"<PriceHistory(stock_id={self.stock_id} date={self.date} close={self.close})>"
