@@ -1,47 +1,43 @@
-from datetime import datetime, date
-from sqlalchemy import (
-    Column, Integer, String, Date, DateTime, Float, BigInteger, ForeignKey, UniqueConstraint, Index
-)
-from sqlalchemy.orm import declarative_base, relationship
+from typing import Optional, List
+from datetime import date, datetime
+from sqlmodel import SQLModel, Field, Relationship
 
-Base = declarative_base()
+class Stock(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ticker: str = Field(index=True, nullable=False, max_length=32)
+    name: Optional[str] = None
+    exchange: Optional[str] = None
+    currency: Optional[str] = None
+    sector: Optional[str] = None
+    industry: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
-class Stock(Base):
-    __tablename__ = "stocks"
+    # relationship to price rows (not strictly required for queries that use stock_code)
+    prices: List["PriceHistory"] = Relationship(back_populates="stock")
 
-    id = Column(Integer, primary_key=True, index=True)
-    ticker = Column(String(32), unique=True, nullable=False, index=True)  # e.g. AAPL, 600519.SS
-    name = Column(String(255), nullable=True)
-    exchange = Column(String(64), nullable=True)
-    currency = Column(String(16), nullable=True)
-    sector = Column(String(128), nullable=True)
-    industry = Column(String(128), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+class PriceHistory(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    # optional FK to Stock.id (table name is 'stock' by default); keep a denormalized stock_code used by queries
+    stock_id: Optional[int] = Field(default=None, foreign_key="stock.id")
+    stock_code: str = Field(index=True, nullable=False, max_length=32)
+    date: date = Field(index=True)
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    close: Optional[float] = None
+    adjusted_close: Optional[float] = None
+    volume: Optional[int] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
-    price_history = relationship("PriceHistory", back_populates="stock", cascade="all, delete-orphan")
+    stock: Optional[Stock] = Relationship(back_populates="prices")
 
-    def __repr__(self):
-        return f"<Stock(id={self.id} ticker={self.ticker} name={self.name})>"
-
-class PriceHistory(Base):
-    __tablename__ = "price_history"
-    __table_args__ = (
-        UniqueConstraint("stock_id", "date", name="uix_stock_date"),
-        Index("ix_price_history_date", "date"),
-    )
-
-    id = Column(Integer, primary_key=True, index=True)
-    stock_id = Column(Integer, ForeignKey("stocks.id", ondelete="CASCADE"), nullable=False, index=True)
-    date = Column(Date, nullable=False)  # trading date (UTC)
-    open = Column(Float, nullable=True)
-    high = Column(Float, nullable=True)
-    low = Column(Float, nullable=True)
-    close = Column(Float, nullable=True)
-    adjusted_close = Column(Float, nullable=True)
-    volume = Column(BigInteger, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-    stock = relationship("Stock", back_populates="price_history")
-
-    def __repr__(self):
-        return f"<PriceHistory(stock_id={self.stock_id} date={self.date} close={self.close})>"
+class NewsItem(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    stock_code: str = Field(index=True, nullable=False, max_length=32)
+    title: str = Field(nullable=False)
+    url: Optional[str] = None
+    published_at: Optional[date] = Field(index=True)
+    content: Optional[str] = None
+    source: Optional[str] = None
+    sentiment_score: Optional[float] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
