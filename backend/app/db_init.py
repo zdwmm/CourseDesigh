@@ -1,18 +1,16 @@
 """
 db_init.py
-- Create database tables (SQLAlchemy Base metadata.create_all)
-- Default DB URL: sqlite:///data/stocks.db
+- Create database tables (SQLModel metadata.create_all)
+- Default DB URL: sqlite:///./data.db
 """
 import os
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from .models import Base
+from sqlmodel import SQLModel, create_engine
 
-DEFAULT_DB_URL = os.environ.get("DATABASE_URL", "sqlite:///data/stocks.db")
+DEFAULT_DB_URL = os.environ.get("DATABASE_URL", "sqlite:///./data.db")
 
 def create_database(db_url: str = DEFAULT_DB_URL):
-    engine = create_engine(db_url, echo=False, future=True)
-    Base.metadata.create_all(bind=engine)
+    engine = create_engine(db_url, echo=False)
+    SQLModel.metadata.create_all(engine)
     return engine
 
 if __name__ == "__main__":

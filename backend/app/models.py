@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from typing import Optional, List
 from datetime import date, datetime
+from typing import Optional, List
 from sqlmodel import SQLModel, Field, Relationship
+from sqlalchemy import UniqueConstraint
+
 
 class Stock(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -14,10 +16,15 @@ class Stock(SQLModel, table=True):
     industry: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
-    prices: Optional[List["PriceHistory"]] = Relationship(back_populates="stock")
+    # ❗ 不要写 Optional[List["PriceHistory"]]
+    prices: List["PriceHistory"] = Relationship(back_populates="stock")
 
 
 class PriceHistory(SQLModel, table=True):
+    __table_args__ = (
+        UniqueConstraint("stock_code", "date", name="uix_stock_code_date"),
+    )
+
     id: Optional[int] = Field(default=None, primary_key=True)
     stock_id: Optional[int] = Field(default=None, foreign_key="stock.id")
     stock_code: str = Field(index=True, nullable=False, max_length=32)
@@ -30,7 +37,7 @@ class PriceHistory(SQLModel, table=True):
     volume: Optional[int] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
-    stock: Optional[Stock] = Relationship(back_populates="prices")
+    stock: Optional["Stock"] = Relationship(back_populates="prices")
 
 
 class NewsItem(SQLModel, table=True):
