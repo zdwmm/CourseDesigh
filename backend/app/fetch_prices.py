@@ -1,5 +1,5 @@
 """
-fetch_prices.py
+fetch_price.py
 
 Provides fetch_and_store_prices(code, period_days, engine) used by backend/app/main.py.
 

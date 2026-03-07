@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional, List
+from typing import Optional
 from sqlmodel import SQLModel, Field, Relationship
 from sqlalchemy import UniqueConstraint
 
@@ -16,8 +16,8 @@ class Stock(SQLModel, table=True):
     industry: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
-    # ❗ 不要写 Optional[List["PriceHistory"]]
-    prices: List["PriceHistory"] = Relationship(back_populates="stock")
+    # ✅ 使用内置 list + forward ref
+    prices: list["PriceHistory"] = Relationship(back_populates="stock")
 
 
 class PriceHistory(SQLModel, table=True):
