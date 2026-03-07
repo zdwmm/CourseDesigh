@@ -24,7 +24,6 @@ from .models import Stock, PriceHistory
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-
 def _download_history_df_tiingo(code: str, period_days: int) -> pd.DataFrame:
     api_key = os.getenv("TIINGO_API_KEY")
     if not api_key:
@@ -75,7 +74,6 @@ def _download_history_df_tiingo(code: str, period_days: int) -> pd.DataFrame:
 
     return df[["date", "open", "high", "low", "close", "adjusted_close", "volume"]]
 
-
 def _load_csv_fallback(code: str) -> pd.DataFrame:
     code_lc = code.lower()
     candidates = [
@@ -116,7 +114,6 @@ def _load_csv_fallback(code: str) -> pd.DataFrame:
     logger.warning("No CSV fallback found for %s", code)
     return pd.DataFrame()
 
-
 def fetch_and_store_prices(code: str, period_days: int, engine) -> int:
     """
     Fetch `period_days` of daily data for `code` and store into DB using provided SQLModel engine.
@@ -126,11 +123,15 @@ def fetch_and_store_prices(code: str, period_days: int, engine) -> int:
 
     # ✅ 优先 Tiingo
     df = _download_history_df_tiingo(code_uc, period_days)
+    if not df.empty:
+        logger.info("Data source: tiingo")
 
     # ✅ Tiingo 失败后回退 CSV
     if df.empty:
         logger.warning("No data fetched for %s via Tiingo, trying CSV fallback", code_uc)
         df = _load_csv_fallback(code_uc)
+        if not df.empty:
+            logger.info("Data source: csv")
 
     if df.empty:
         logger.warning("No data available for %s after fallback", code_uc)
