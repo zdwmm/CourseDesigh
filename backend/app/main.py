@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from sqlmodel import SQLModel, Session, create_engine, select
 from typing import Optional
 import os
@@ -29,19 +30,48 @@ def admin_fetch_prices(code: str, period_days: int = 365):
     rows = fetch_and_store_prices(code, period_days, engine)
     return {"fetched_rows": rows}
 
+
+def _parse_date_param(param: Optional[str], param_name: str) -> Optional[date]:
+    if not param:
+        return None
+    try:
+        return datetime.strptime(param, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid date format for '{param_name}', expected YYYY-MM-DD"
+        )
+
+
 @app.get("/stocks/{code}/history")
 def get_history(code: str, start: Optional[str] = None, end: Optional[str] = None):
+    """
+    历史行情查询接口：
+    /stocks/{code}/history?start=YYYY-MM-DD&end=YYYY-MM-DD
+    """
+    code = code.upper().strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Stock code cannot be empty")
+
+    start_date = _parse_date_param(start, "start")
+    end_date = _parse_date_param(end, "end")
+
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=400, detail="start date cannot be after end date")
+
     with Session(engine) as session:
-        q = select(PriceHistory).where(PriceHistory.stock_code == code.upper())
-        if start:
-            q = q.where(PriceHistory.date >= start)
-        if end:
-            q = q.where(PriceHistory.date <= end)
+        q = select(PriceHistory).where(PriceHistory.stock_code == code)
+        if start_date:
+            q = q.where(PriceHistory.date >= start_date)
+        if end_date:
+            q = q.where(PriceHistory.date <= end_date)
         q = q.order_by(PriceHistory.date)
+
         results = session.exec(q).all()
         if not results:
-            raise HTTPException(status_code=404, detail="No history found")
+            raise HTTPException(status_code=404, detail="No history found for this range")
         return [r.dict() for r in results]
+
 
 @app.post("/admin/import_news/{code}")
 def admin_import_news(code: str):
