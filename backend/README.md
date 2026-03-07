@@ -5,8 +5,8 @@
 1. 安装依赖
 
 ```
-python -m venv .venv
-source .venv/bin/activate
+python -m venv .myveny
+source myveny/Scripts/activate
 pip install -r requirements.txt
 ```
 
