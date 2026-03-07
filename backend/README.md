@@ -44,3 +44,32 @@ curl "http://127.0.0.1:8000/stocks/AAPL/history?start=2023-01-01&end=2023-12-31"
 - `start` / `end` 必须为 `YYYY-MM-DD` 格式
 - 当 `start > end` 时返回 400
 - 当无数据时返回 404
+
+---
+
+## Tiingo + CSV 回退说明（优先 Tiingo）
+
+系统会**优先使用 Tiingo 抓取数据**，若 Tiingo 无法获取（例如 API Key 未配置、请求失败），则自动回退到本地 CSV 文件。
+
+### 1) 配置 Tiingo API Key
+在系统环境变量中设置：
+
+```
+TIINGO_API_KEY=你的Key
+```
+
+### 2) CSV 回退文件
+回退文件路径：`data/prices_<ticker>.csv`  
+例如：`data/prices_aapl.csv`
+
+CSV 文件字段要求：
+
+```
+Date,Open,High,Low,Close,Adj Close,Volume
+```
+
+使用方式仍然保持不变：
+
+```
+curl -X POST "http://127.0.0.1:8000/admin/fetch_prices/AAPL?period_days=365"
+```

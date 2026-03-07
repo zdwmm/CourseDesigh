@@ -4,14 +4,18 @@ fetch_price.py
 Provides fetch_and_store_prices(code, period_days, engine) used by backend/app/main.py.
 
 Behavior:
-- Uses yfinance to download daily OHLCV for the requested ticker for the last `period_days` days.
+- Uses Tiingo to download daily OHLCV for the requested ticker for the last `period_days` days.
+- If Tiingo fails or returns empty, falls back to local CSV: data/prices_<ticker>.csv
 - Ensures a Stock record exists (creates/updates basic metadata).
 - Inserts or updates PriceHistory rows keyed by (stock_code, date).
 - Returns number of rows inserted/updated (inserted + updated).
 """
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 import logging
+import os
+from pathlib import Path
 import pandas as pd
+import requests
 import yfinance as yf
 from sqlmodel import Session, select
 
@@ -20,30 +24,98 @@ from .models import Stock, PriceHistory
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-def _download_history_df(code: str, period_days: int) -> pd.DataFrame:
-    # yfinance supports start/end; compute start date
+
+def _download_history_df_tiingo(code: str, period_days: int) -> pd.DataFrame:
+    api_key = os.getenv("TIINGO_API_KEY")
+    if not api_key:
+        logger.warning("TIINGO_API_KEY not set, skipping Tiingo fetch")
+        return pd.DataFrame()
+
     end = datetime.utcnow().date()
     start = end - timedelta(days=period_days)
-    # yfinance expects strings; use start and end
-    df = yf.download(code, start=start.isoformat(), end=(end + timedelta(days=1)).isoformat(), interval="1d", progress=False, auto_adjust=False)
-    if df is None or df.empty:
+    url = f"https://api.tiingo.com/tiingo/daily/{code}/prices"
+    params = {
+        "startDate": start.isoformat(),
+        "endDate": end.isoformat(),
+        "token": api_key,
+    }
+
+    try:
+        resp = requests.get(url, params=params, timeout=15)
+        if resp.status_code != 200:
+            logger.error("Tiingo fetch failed (%s): %s", resp.status_code, resp.text[:200])
+            return pd.DataFrame()
+        data = resp.json()
+    except Exception as exc:
+        logger.error("Tiingo request failed for %s: %s", code, exc)
         return pd.DataFrame()
-    df = df.reset_index()
-    df['Date'] = pd.to_datetime(df['Date']).dt.date
-    df = df.rename(columns={
-        "Date": "date",
-        "Open": "open",
-        "High": "high",
-        "Low": "low",
-        "Close": "close",
-        "Adj Close": "adjusted_close",
-        "Volume": "volume"
-    })
-    # ensure expected columns exist
-    for c in ['date','open','high','low','close','adjusted_close','volume']:
+
+    if not isinstance(data, list) or not data:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(data)
+    if df.empty:
+        return pd.DataFrame()
+
+    df["date"] = pd.to_datetime(df["date"]).dt.date
+    df = df.rename(
+        columns={
+            "open": "open",
+            "high": "high",
+            "low": "low",
+            "close": "close",
+            "adjClose": "adjusted_close",
+            "volume": "volume",
+        }
+    )
+
+    for c in ["date", "open", "high", "low", "close", "adjusted_close", "volume"]:
         if c not in df.columns:
             df[c] = None
-    return df[['date','open','high','low','close','adjusted_close','volume']]
+
+    return df[["date", "open", "high", "low", "close", "adjusted_close", "volume"]]
+
+
+def _load_csv_fallback(code: str) -> pd.DataFrame:
+    code_lc = code.lower()
+    candidates = [
+        Path(__file__).resolve().parents[2] / "data" / f"prices_{code_lc}.csv",
+        Path(__file__).resolve().parents[1] / "data" / f"prices_{code_lc}.csv",
+    ]
+    for p in candidates:
+        if p.exists():
+            try:
+                df = pd.read_csv(p)
+            except Exception as exc:
+                logger.error("Failed to read CSV fallback %s: %s", p, exc)
+                continue
+
+            if "Date" in df.columns:
+                df["Date"] = pd.to_datetime(df["Date"]).dt.date
+            elif "date" in df.columns:
+                df["date"] = pd.to_datetime(df["date"]).dt.date
+
+            df = df.rename(
+                columns={
+                    "Date": "date",
+                    "Open": "open",
+                    "High": "high",
+                    "Low": "low",
+                    "Close": "close",
+                    "Adj Close": "adjusted_close",
+                    "Volume": "volume",
+                }
+            )
+            for c in ["date", "open", "high", "low", "close", "adjusted_close", "volume"]:
+                if c not in df.columns:
+                    df[c] = None
+
+            logger.info("Using CSV fallback: %s", p)
+            return df[["date", "open", "high", "low", "close", "adjusted_close", "volume"]]
+
+    logger.warning("No CSV fallback found for %s", code)
+    return pd.DataFrame()
+
 
 def fetch_and_store_prices(code: str, period_days: int, engine) -> int:
     """
@@ -51,20 +123,26 @@ def fetch_and_store_prices(code: str, period_days: int, engine) -> int:
     Returns: total inserted_or_updated rows count.
     """
     code_uc = code.upper()
-    df = _download_history_df(code_uc, period_days)
+
+    # ✅ 优先 Tiingo
+    df = _download_history_df_tiingo(code_uc, period_days)
+
+    # ✅ Tiingo 失败后回退 CSV
     if df.empty:
-        logger.warning("No data fetched for %s", code_uc)
+        logger.warning("No data fetched for %s via Tiingo, trying CSV fallback", code_uc)
+        df = _load_csv_fallback(code_uc)
+
+    if df.empty:
+        logger.warning("No data available for %s after fallback", code_uc)
         return 0
 
     inserted = 0
     updated = 0
 
     with Session(engine) as session:
-        # ensure stock exists
         stmt = select(Stock).where(Stock.ticker == code_uc)
         stock = session.exec(stmt).one_or_none()
         if not stock:
-            # try get metadata from yfinance Ticker.info (best-effort)
             name = None
             try:
                 info = yf.Ticker(code_uc).info or {}
@@ -77,20 +155,30 @@ def fetch_and_store_prices(code: str, period_days: int, engine) -> int:
             session.refresh(stock)
 
         for _, row in df.iterrows():
-            dt = row['date']
-            # try find existing PriceHistory by stock_code + date
-            stmt2 = select(PriceHistory).where(PriceHistory.stock_code == code_uc, PriceHistory.date == dt)
+            dt = row["date"]
+            stmt2 = select(PriceHistory).where(
+                PriceHistory.stock_code == code_uc, PriceHistory.date == dt
+            )
             existing = session.exec(stmt2).one_or_none()
             if existing:
-                # update fields if changed
                 changed = False
-                for attr, col in [('open','open'), ('high','high'), ('low','low'), ('close','close'), ('adjusted_close','adjusted_close'), ('volume','volume')]:
+                for attr, col in [
+                    ("open", "open"),
+                    ("high", "high"),
+                    ("low", "low"),
+                    ("close", "close"),
+                    ("adjusted_close", "adjusted_close"),
+                    ("volume", "volume"),
+                ]:
                     new_val = row[col]
-                    # pandas may use numpy types; normalize to python types / None
                     if pd.isna(new_val):
                         new_val = None
                     if getattr(existing, attr) != new_val:
-                        setattr(existing, attr, int(new_val) if attr == 'volume' and new_val is not None else new_val)
+                        setattr(
+                            existing,
+                            attr,
+                            int(new_val) if attr == "volume" and new_val is not None else new_val,
+                        )
                         changed = True
                 if changed:
                     session.add(existing)
@@ -100,12 +188,14 @@ def fetch_and_store_prices(code: str, period_days: int, engine) -> int:
                     stock_id=stock.id,
                     stock_code=code_uc,
                     date=dt,
-                    open=row['open'] if not pd.isna(row['open']) else None,
-                    high=row['high'] if not pd.isna(row['high']) else None,
-                    low=row['low'] if not pd.isna(row['low']) else None,
-                    close=row['close'] if not pd.isna(row['close']) else None,
-                    adjusted_close=row['adjusted_close'] if not pd.isna(row['adjusted_close']) else None,
-                    volume=int(row['volume']) if not pd.isna(row['volume']) else None
+                    open=row["open"] if not pd.isna(row["open"]) else None,
+                    high=row["high"] if not pd.isna(row["high"]) else None,
+                    low=row["low"] if not pd.isna(row["low"]) else None,
+                    close=row["close"] if not pd.isna(row["close"]) else None,
+                    adjusted_close=row["adjusted_close"]
+                    if not pd.isna(row["adjusted_close"])
+                    else None,
+                    volume=int(row["volume"]) if not pd.isna(row["volume"]) else None,
                 )
                 session.add(ph)
                 inserted += 1
