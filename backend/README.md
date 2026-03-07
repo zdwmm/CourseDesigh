@@ -55,7 +55,9 @@ curl "http://127.0.0.1:8000/stocks/AAPL/history?start=2023-01-01&end=2023-12-31"
 在系统环境变量中设置：
 
 ```
-TIINGO_API_KEY=你的Key
+TIINGO_API_KEY=6f9665ce00424b8eee6b597cb5e6234b650a21de
+启动后端前命令行配置命令:
+export TIINGO_API_KEY=6f9665ce00424b8eee6b597cb5e6234b650a21de
 ```
 
 ### 2) CSV 回退文件
