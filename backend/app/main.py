@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 from datetime import datetime, date, timedelta
 import pandas as pd
@@ -13,6 +14,15 @@ from .predict import generate_prediction_from_sentiment
 
 app = FastAPI(title="Stock Sentiment Prediction API")
 engine = get_engine()
+
+# 允许本地前端调试；部署后请替换为实际前端域名
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.on_event("startup")
 def on_startup():
@@ -119,10 +129,3 @@ def news_sentiment_series(code: str, days: int = 30):
     df["date"] = pd.to_datetime(df["date"]).dt.date
     agg = df.groupby("date")["score"].mean().reset_index()
     return agg.to_dict(orient="records")
-
-@app.get("/prediction/{code}")
-def prediction(code: str, window: int = 30, alpha: float = 0.01):
-    result = generate_prediction_from_sentiment(code.upper(), window, alpha, engine)
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
-    return result
