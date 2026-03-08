@@ -1,9 +1,16 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from pathlib import Path
 from typing import Optional
 from datetime import datetime, date, timedelta
-import pandas as pd
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
+import pandas as pd
+from dotenv import load_dotenv
+
+# 在应用启动前加载 .env（当前工作目录与仓库根目录各尝试一次）
+load_dotenv(dotenv_path=Path(".env"))
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
 
 from .database import init_db, get_engine
 from .models import PriceHistory, NewsItem
@@ -129,3 +136,7 @@ def news_sentiment_series(code: str, days: int = 30):
     df["date"] = pd.to_datetime(df["date"]).dt.date
     agg = df.groupby("date")["score"].mean().reset_index()
     return agg.to_dict(orient="records")
+
+@app.get("/prediction/{code}")
+def prediction(code: str, window: int = 30, alpha: float = 0.01):
+    return generate_prediction_from_sentiment(code.upper(), window=window, alpha=alpha, engine=engine)
