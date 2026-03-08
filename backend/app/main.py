@@ -1,35 +1,31 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
-from sqlmodel import SQLModel, Session, create_engine, select
 from typing import Optional
-import os
-from datetime import date, datetime, timedelta
+from datetime import datetime, date, timedelta
 import pandas as pd
+from sqlmodel import Session, select
 
-from .models import Stock, PriceHistory, NewsItem
+from .database import init_db, get_engine
+from .models import PriceHistory, NewsItem
 from .fetch_price import fetch_and_store_prices
 from .fetch_news import import_news_from_csv_or_api
 from .sentiment import compute_sentiment_for_news
 from .predict import generate_prediction_from_sentiment
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data.db")
-engine = create_engine(DATABASE_URL, echo=False)
-
-app = FastAPI(title="Stocks Sentiment PoC")
+app = FastAPI(title="Stock Sentiment Prediction API")
+engine = get_engine()
 
 @app.on_event("startup")
 def on_startup():
-    SQLModel.metadata.create_all(engine)
+    init_db()
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "time": datetime.utcnow().isoformat()}
+    return {"status": "ok"}
 
 @app.post("/admin/fetch_prices/{code}")
 def admin_fetch_prices(code: str, period_days: int = 365):
     rows = fetch_and_store_prices(code, period_days, engine)
     return {"fetched_rows": rows}
-
 
 def _parse_date_param(param: Optional[str], param_name: str) -> Optional[date]:
     if not param:
@@ -42,13 +38,8 @@ def _parse_date_param(param: Optional[str], param_name: str) -> Optional[date]:
             detail=f"Invalid date format for '{param_name}', expected YYYY-MM-DD"
         )
 
-
 @app.get("/stocks/{code}/history")
 def get_history(code: str, start: Optional[str] = None, end: Optional[str] = None):
-    """
-    历史行情查询接口：
-    /stocks/{code}/history?start=YYYY-MM-DD&end=YYYY-MM-DD
-    """
     code = code.upper().strip()
     if not code:
         raise HTTPException(status_code=400, detail="Stock code cannot be empty")
@@ -62,16 +53,15 @@ def get_history(code: str, start: Optional[str] = None, end: Optional[str] = Non
     with Session(engine) as session:
         q = select(PriceHistory).where(PriceHistory.stock_code == code)
         if start_date:
-            q = q.where(PriceHistory.date >= start_date)
+            q = q.where(PriceHistory.date >= start_date.isoformat())
         if end_date:
-            q = q.where(PriceHistory.date <= end_date)
+            q = q.where(PriceHistory.date <= end_date.isoformat())
         q = q.order_by(PriceHistory.date)
 
         results = session.exec(q).all()
         if not results:
             raise HTTPException(status_code=404, detail="No history found for this range")
         return [r.dict() for r in results]
-
 
 @app.post("/admin/import_news/{code}")
 def admin_import_news(code: str):
@@ -85,7 +75,25 @@ def news_list(code: str, limit: int = 20):
             NewsItem.stock_code == code.upper()
         ).order_by(NewsItem.published_at.desc())
         results = session.exec(q).all()[:limit]
-        return [r.dict() for r in results]
+
+    def _summary(text: str, n: int = 80):
+        if not text:
+            return ""
+        return text if len(text) <= n else text[:n] + "..."
+
+    return [
+        {
+            "id": r.id,
+            "stock_code": r.stock_code,
+            "published_at": r.published_at,
+            "title": r.title,
+            "source": r.source,
+            "content": r.content,
+            "summary": _summary(r.content, 80),
+            "sentiment_score": r.sentiment_score,
+        }
+        for r in results
+    ]
 
 @app.post("/admin/sentiment/{code}")
 def admin_sentiment(code: str):
@@ -114,4 +122,7 @@ def news_sentiment_series(code: str, days: int = 30):
 
 @app.get("/prediction/{code}")
 def prediction(code: str, window: int = 30, alpha: float = 0.01):
-    return generate_prediction_from_sentiment(code.upper(), window, alpha, engine)
+    result = generate_prediction_from_sentiment(code.upper(), window, alpha, engine)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result

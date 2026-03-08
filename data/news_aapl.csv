@@ -1,6 +1,11 @@
-title,url,published_at,content,source
-"Apple reports record earnings","https://example.com/a1","2026-02-10","Apple reported record earnings for the quarter...","Example News"
-"Apple launches new product","https://example.com/a2","2026-02-15","Apple announced the launch of a new product line...","Example News"
-"Analyst upgrades Apple","https://example.com/a3","2026-02-20","An analyst upgraded Apple to buy from hold...","Example News"
-"Supply chain concerns over Apple","https://example.com/a4","2026-02-25","Reports indicate potential supply chain delays...","Example News"
-"Apple stock hits new high","https://example.com/a5","2026-03-01","Apple stock reached a new high after positive guidance...","Example News"
+published_at,title,content,source
+2026-02-25,Apple services momentum continues,Analysts highlight recurring revenue resilience from services.,manual
+2026-02-26,Apple supply chain update,Channel checks indicate stable component lead times.,manual
+2026-02-27,Apple AI feature rumors,Investors focus on potential on-device AI upgrades.,manual
+2026-02-28,Institution keeps neutral rating,Valuation remains key debate despite cash flow strength.,manual
+2026-03-01,Developer ecosystem expansion,New tools may improve developer productivity and retention.,manual
+2026-03-02,Global demand mixed by region,Some regions show slower replacement cycles than expected.,manual
+2026-03-03,Capital return policy in focus,Buyback pace remains an important support signal.,manual
+2026-03-04,Product cycle expectations reset,Market expects moderate upgrades in upcoming cycle.,manual
+2026-03-05,Enterprise adoption trends,Enterprise clients evaluate security and device management upgrades.,manual
+2026-03-06,Short-term volatility persists,Macro rate expectations continue to drive valuation swings.,manual
