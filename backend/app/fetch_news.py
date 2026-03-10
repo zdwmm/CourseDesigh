@@ -9,50 +9,37 @@ from sqlmodel import Session, select
 
 from .models import NewsItem
 
-def _load_news_online(code: str, days: int = 30) -> pd.DataFrame:
-    """
-    在线抓取新闻（优先）
-    这里用 NewsAPI 示例；你也可以替换成 Tiingo News。
-    """
-    api_key = os.getenv("NEWSAPI_KEY", "").strip()
+
+def _load_news_tiingo(code: str, days: int = 45) -> pd.DataFrame:
+    api_key = os.getenv("TIINGO_API_KEY", "").strip()
     if not api_key:
         return pd.DataFrame()
 
     end = datetime.utcnow().date()
     start = end - timedelta(days=days)
-
-    url = "https://newsapi.org/v2/everything"
+    url = "https://api.tiingo.com/tiingo/news"
     params = {
-        "q": code,
-        "from": start.isoformat(),
-        "to": end.isoformat(),
-        "sortBy": "publishedAt",
-        "language": "en",
-        "pageSize": 100,
-        "apiKey": api_key,
+        "tickers": code.lower(),
+        "startDate": start.isoformat(),
+        "endDate": end.isoformat(),
+        "limit": 200,
+        "token": api_key,
     }
-
     try:
         resp = requests.get(url, params=params, timeout=20)
-        if resp.status_code != 200:
-            return pd.DataFrame()
+        resp.raise_for_status()
         data = resp.json()
     except Exception:
         return pd.DataFrame()
 
-    articles = data.get("articles", [])
-    if not articles:
-        return pd.DataFrame()
-
     rows: List[Dict] = []
-    for a in articles:
+    for a in data:
         rows.append({
-            "published_at": (a.get("publishedAt") or "")[:10],
+            "published_at": (a.get("publishedDate") or "")[:10],
             "title": a.get("title") or "",
-            "content": a.get("content") or a.get("description") or "",
-            "source": (a.get("source") or {}).get("name", "newsapi"),
+            "content": a.get("description") or "",
+            "source": a.get("source") or "tiingo",
         })
-
     df = pd.DataFrame(rows)
     df = df[df["title"].astype(str).str.strip() != ""]
     return df
@@ -64,7 +51,6 @@ def _load_news_csv_fallback(code: str) -> pd.DataFrame:
         Path(__file__).resolve().parents[2] / "data" / f"news_{c}.csv",
         Path(__file__).resolve().parents[1] / "data" / f"news_{c}.csv",
     ]
-
     for p in candidates:
         if not p.exists():
             continue
@@ -75,25 +61,22 @@ def _load_news_csv_fallback(code: str) -> pd.DataFrame:
 
         rename_map = {"date": "published_at", "time": "published_at", "正文": "content", "标题": "title", "来源": "source"}
         df = df.rename(columns=rename_map)
-
         for col in ["published_at", "title", "content", "source"]:
             if col not in df.columns:
                 df[col] = ""
-
         df["published_at"] = df["published_at"].astype(str).str.slice(0, 10)
         df = df[df["title"].astype(str).str.strip() != ""]
         return df
-
     return pd.DataFrame()
 
 
 def import_news_from_csv_or_api(code: str, engine) -> int:
     code = code.upper()
 
-    # 1) 优先在线
-    df = _load_news_online(code, days=45)
+    # 1) 在线 Tiingo
+    df = _load_news_tiingo(code, days=45)
 
-    # 2) 回退CSV
+    # 2) 回退 CSV
     if df.empty:
         df = _load_news_csv_fallback(code)
 
