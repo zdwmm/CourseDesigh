@@ -1,49 +1,98 @@
-from datetime import datetime
+import logging
+import os
+from functools import lru_cache
+from typing import List, Tuple
 
 from snownlp import SnowNLP
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from sqlmodel import Session, select
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
-from .models import NewsItem
+from .models import ModelVersion, NewsItem, SentimentScore
 
-# 作为兜底的英语情感分析器
-vader_analyzer = SentimentIntensityAnalyzer()
+logger = logging.getLogger(__name__)
+vader = SentimentIntensityAnalyzer()
 
 
-def _score_with_snownlp(text: str) -> float:
-    """使用 SnowNLP 生成 [0,1] 情感分数；异常时抛出。"""
+@lru_cache(maxsize=1)
+def _get_hf_pipeline():
+    """
+    Lazy-load HuggingFace 情感模型；设置 HF_SENTIMENT_MODEL 来指定模型。
+    若下载或加载失败，会抛异常，由上层兜底。
+    """
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
+
+    model_name = os.getenv("HF_SENTIMENT_MODEL", "hfl/chinese-roberta-wwm-ext-large")
+    tok = AutoTokenizer.from_pretrained(model_name)
+    mdl = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
+    return pipeline("text-classification", model=mdl, tokenizer=tok, top_k=None)
+
+
+def _score_hf(texts: List[str]) -> List[Tuple[float, float]]:
+    """
+    使用 HF pipeline，返回 (score, confidence) 列表。
+    假设 label1/pos 表示正向；如模型标签不同需适配。
+    """
+    clf = _get_hf_pipeline()
+    outputs = clf(texts, truncation=True, max_length=256)
+    results = []
+    for out in outputs:
+        pos = next((x for x in out if "1" in x["label"] or "pos" in x["label"].lower()), out[0])
+        score = float(pos["score"])
+        results.append((score, score))
+    return results
+
+
+def _score_snownlp(text: str) -> Tuple[float, float]:
     s = SnowNLP(text)
-    return float(s.sentiments)  # already 0~1
+    v = float(s.sentiments)  # 0~1
+    return v, 1.0
 
 
-def _score_with_vader(text: str) -> float:
-    """VADER 兜底，输出 0~1 区间以统一范围。"""
-    vs = vader_analyzer.polarity_scores(text)
-    return (vs["compound"] + 1) / 2  # map [-1,1] -> [0,1]
+def _score_vader(text: str) -> Tuple[float, float]:
+    vs = vader.polarity_scores(text)
+    score = (vs["compound"] + 1) / 2
+    return score, abs(vs["compound"])
 
 
-def compute_sentiment_for_news(code: str, engine):
-    """为指定股票的所有新闻计算情感分数并写回 DB，返回被评分的数量。"""
-    with Session(engine) as session:
-        items = session.exec(
-            select(NewsItem).where(NewsItem.stock_code == code.upper())
-        ).all()
+def batch_compute_sentiment(news: List[NewsItem], model_version: ModelVersion, engine) -> int:
+    """
+    对新闻列表批量打分并写入 SentimentScore，兼容旧字段 sentiment_score。
+    兜底顺序：HF -> SnowNLP -> VADER。
+    """
+    texts = [f"{n.title or ''}\n{n.content or ''}".strip() for n in news]
+    scores: List[Tuple[float, float]] = []
 
-        count = 0
-        for it in items:
-            text = f"{it.title or ''}\n{it.content or ''}".strip()
-            if not text:
-                continue
-
+    try:
+        scores = _score_hf(texts)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("HF model failed, fallback to SnowNLP/VADER: %s", e)
+        for t in texts:
             try:
-                score = _score_with_snownlp(text)
+                scores.append(_score_snownlp(t))
             except Exception:
-                score = _score_with_vader(text)
+                scores.append(_score_vader(t))
 
-            it.sentiment_score = score
-            session.add(it)
-            count += 1
-
+    with Session(engine) as session:
+        for n, (score, conf) in zip(news, scores):
+            sc = SentimentScore(
+                news_id=n.id,
+                model_version_id=model_version.id,
+                stock_code=n.stock_code,
+                published_at=n.published_at or n.created_at.date(),
+                score=score,
+                confidence=conf,
+            )
+            n.sentiment_score = score  # 旧接口兼容
+            session.add(sc)
+            session.add(n)
         session.commit()
+    return len(news)
 
-    return count
+
+def compute_sentiment_for_code(code: str, model_version: ModelVersion, engine) -> int:
+    """兼容 admin 调用：对指定股票全部新闻打分。"""
+    with Session(engine) as session:
+        items = session.exec(select(NewsItem).where(NewsItem.stock_code == code.upper())).all()
+    if not items:
+        return 0
+    return batch_compute_sentiment(items, model_version, engine)
