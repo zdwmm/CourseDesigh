@@ -16,6 +16,13 @@ from .fetch_price import fetch_and_store_prices
 from .sentiment import compute_sentiment_for_news
 from .predict import generate_prediction_from_sentiment
 from .crawlers.manager import CrawlerManager
+from .analyzers.sentiment_analyzer import NewsSegmentAnalyzer, DailySentimentAggregator
+from .analyzers.technical_analyzer import TechnicalAnalysisReport, TechnicalIndicatorCalculator
+from .predictors.ensemble_predictor import PredictionEnsembler
+import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 配置日志
 logging.basicConfig(
@@ -304,3 +311,238 @@ def admin_predict(code: str):
 def get_prediction(code: str, window: int = 30, alpha: float = 0.01):
     """获取预测结果"""
     return {"code": code, "window": window, "alpha": alpha}
+
+
+# ==================== 【新增】情感分析端点 ====================
+
+@app.post("/analyze/sentiment")
+async def analyze_news_sentiment(stock_code: str, limit: int = 20):
+    """
+    【新端点】分析最近新闻的情感
+    
+    【说明】：
+    - 从 MySQL 获取该股票最近的新闻
+    - 逐条进行情感分析
+    - 返回聚合结果
+    
+    【示例】：
+    curl -X POST "http://localhost:8000/analyze/sentiment?stock_code=INDEX&limit=20"
+    """
+    try:
+        analyzer = NewsSegmentAnalyzer()
+        
+        # 获取最近新闻
+        with Session(engine) as session:
+            q = select(NewsItem).where(
+                NewsItem.stock_code == stock_code.upper()
+            ).order_by(NewsItem.published_at.desc())
+            
+            news_items = session.exec(q).all()[:limit]
+        
+        if not news_items:
+            return {
+                "code": 404,
+                "message": f"未找到股票 {stock_code} 的新闻",
+                "data": None
+            }
+        
+        # 转换为列表格式
+        news_list = [
+            {
+                'title': item.title,
+                'content': item.content,
+                'source': item.source,
+                'published_at': item.published_at.isoformat() if hasattr(item.published_at, 'isoformat') else str(item.published_at),
+            }
+            for item in news_items
+        ]
+        
+        # 批量分析
+        analyzed_news = analyzer.analyze_batch_news(news_list)
+        
+        # 聚合日度情感
+        daily_agg = DailySentimentAggregator.aggregate_daily_sentiment(analyzed_news)
+        
+        return {
+            "code": 200,
+            "message": "情感分析成功",
+            "data": {
+                "stock_code": stock_code,
+                "news_count": len(analyzed_news),
+                "daily_sentiment": daily_agg,
+                "recent_news": [
+                    {
+                        'title': item['title'],
+                        'sentiment': item['sentiment_analysis']['sentiment'],
+                        'confidence': item['sentiment_analysis']['confidence'],
+                    }
+                    for item in analyzed_news[:5]  # 只返回最近5条
+                ]
+            }
+        }
+    
+    except Exception as e:
+        logger.error(f"情感分析错误: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/analyze/technical/{code}")
+async def analyze_technical_indicators(code: str, days: int = 60):
+    """
+    【新端点】技术面分析
+    
+    【说明】：
+    - 获取历史价格数据
+    - 计算技术指标
+    - 生成技术分析报告
+    
+    【示例】：
+    curl "http://localhost:8000/analyze/technical/AAPL?days=60"
+    """
+    try:
+        code = code.upper()
+        
+        # 获取价格数据
+        with Session(engine) as session:
+            q = select(PriceHistory).where(
+                PriceHistory.stock_code == code
+            ).order_by(PriceHistory.date.desc())
+            
+            results = session.exec(q).all()[:days]
+        
+        if not results:
+            raise HTTPException(status_code=404, detail=f"未找到股票 {code} 的价格数据")
+        
+        # 转换为 DataFrame
+        df = pd.DataFrame([
+            {
+                'date': r.date,
+                'open': r.open,
+                'high': r.high,
+                'low': r.low,
+                'close': r.close,
+                'volume': r.volume,
+            }
+            for r in reversed(results)  # 按时间升序
+        ])
+        
+        # 生成技术分析报告
+        report = TechnicalAnalysisReport.generate_report(df)
+        
+        return {
+            "code": 200,
+            "message": "技术分析成功",
+            "data": {
+                "stock_code": code,
+                "analysis_date": datetime.now().isoformat(),
+                **report  # 展开报告内容
+            }
+        }
+    
+    except Exception as e:
+        logger.error(f"技术分析错误: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/predict/signal/{code}")
+async def generate_prediction_signal(
+    code: str,
+    use_sentiment: bool = True,
+    use_technical: bool = True
+):
+    """
+    ✏️ 【新端点】生成综合预测信号
+    
+    【说明】：
+    - 融合情感分析和技术指标
+    - 生成 BUY/HOLD/SELL 信号
+    - 返回置信度和建议
+    
+    【参数】：
+    - use_sentiment: 是否使用情感分析（默认 True）
+    - use_technical: 是否使用技术指标（默认 True）
+    
+    【示例】：
+    curl "http://localhost:8000/predict/signal/AAPL?use_sentiment=true&use_technical=true"
+    
+    【工作流程】：
+    1. 获取最近新闻 → 情感分析
+    2. 获取价格数据 → 技术分析
+    3. 融合两个分数 → 生成信号
+    """
+    try:
+        code = code.upper()
+        
+        # 初始化评分
+        sentiment_score = 0.0
+        technical_score = 50.0
+        
+        # 第一步：情感分析
+        if use_sentiment:
+            try:
+                with Session(engine) as session:
+                    q = select(NewsItem).where(
+                        NewsItem.stock_code == code
+                    ).order_by(NewsItem.published_at.desc())
+                    
+                    news_items = session.exec(q).all()[:50]  # 获取最近50条新闻
+                
+                if news_items:
+                    analyzer = NewsSegmentAnalyzer()
+                    news_list = [
+                        {'content': item.content, 'source': item.source}
+                        for item in news_items
+                    ]
+                    analyzed = analyzer.analyze_batch_news(news_list)
+                    agg = DailySentimentAggregator.aggregate_daily_sentiment(analyzed)
+                    sentiment_score = agg['weighted_sentiment'] / 50 - 1  # 标准化到 -1~1
+            
+            except Exception as e:
+                logger.warning(f"情感分析失败，跳过: {e}")
+        
+        # 第二步：技术分析
+        if use_technical:
+            try:
+                with Session(engine) as session:
+                    q = select(PriceHistory).where(
+                        PriceHistory.stock_code == code
+                    ).order_by(PriceHistory.date.desc())
+                    
+                    results = session.exec(q).all()[:60]
+                
+                if results:
+                    df = pd.DataFrame([
+                        {
+                            'open': r.open,
+                            'high': r.high,
+                            'low': r.low,
+                            'close': r.close,
+                            'volume': r.volume,
+                        }
+                        for r in reversed(results)
+                    ])
+                    report = TechnicalAnalysisReport.generate_report(df)
+                    technical_score = report.get('technical_score', 50.0)
+            
+            except Exception as e:
+                logger.warning(f"技术分析失败，跳过: {e}")
+        
+        # 第三步：融合生成信号
+        signal = PredictionEnsembler.generate_prediction_signal(
+            stock_code=code,
+            sentiment_score=sentiment_score,
+            technical_score=technical_score,
+        )
+        
+        return {
+            "code": 200,
+            "message": "预测信号生成成功",
+            "data": {
+                "stock_code": code,
+                **signal
+            }
+        }
+    
+    except Exception as e:
+        logger.error(f"预测信号生成错误: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
