@@ -19,7 +19,11 @@ def _get_hf_pipeline():
     Lazy-load HuggingFace 情感模型；设置 HF_SENTIMENT_MODEL 来指定模型。
     若下载或加载失败，会抛异常，由上层兜底。
     """
-    from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
+    try:
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
+    except ImportError as e:
+        logger.error("transformers library not installed: %s", e)
+        raise ImportError("transformers library is required for HF model. Install with: pip install transformers torch") from e
 
     model_name = os.getenv("HF_SENTIMENT_MODEL", "hfl/chinese-roberta-wwm-ext-large")
     tok = AutoTokenizer.from_pretrained(model_name)
