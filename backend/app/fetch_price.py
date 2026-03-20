@@ -16,7 +16,6 @@ import os
 from pathlib import Path
 import pandas as pd
 import requests
-import yfinance as yf
 from sqlmodel import Session, select
 
 from .models import Stock, PriceHistory
@@ -114,6 +113,25 @@ def _load_csv_fallback(code: str) -> pd.DataFrame:
     logger.warning("No CSV fallback found for %s", code)
     return pd.DataFrame()
 
+def _get_stock_name_from_dataframe(code: str, df: pd.DataFrame) -> str:
+    """
+    尝试从 DataFrame 或环境变量中获取股票名称。
+    不再使用 yfinance 以避免额外依赖。
+    """
+    # 首先尝试从环境变量或配置获取
+    stock_names = os.getenv("STOCK_NAMES", "")
+    if stock_names:
+        import json
+        try:
+            names_dict = json.loads(stock_names)
+            return names_dict.get(code, None)
+        except Exception:
+            pass
+    
+    # 如果 DataFrame 有足够数据，推断名称（可选）
+    # 这里我们简单地返回 None，让数据库处理
+    return None
+
 def fetch_and_store_prices(code: str, period_days: int, engine) -> int:
     """
     Fetch `period_days` of daily data for `code` and store into DB using provided SQLModel engine.
@@ -144,12 +162,8 @@ def fetch_and_store_prices(code: str, period_days: int, engine) -> int:
         stmt = select(Stock).where(Stock.ticker == code_uc)
         stock = session.exec(stmt).one_or_none()
         if not stock:
-            name = None
-            try:
-                info = yf.Ticker(code_uc).info or {}
-                name = info.get("shortName") or info.get("longName")
-            except Exception:
-                name = None
+            # ✅ 修改：不使用 yfinance，直接使用 None 或从其他方式获取
+            name = _get_stock_name_from_dataframe(code_uc, df)
             stock = Stock(ticker=code_uc, name=name)
             session.add(stock)
             session.commit()
