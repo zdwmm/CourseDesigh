@@ -13,14 +13,11 @@ from sqlmodel import Session, select
 from .database import init_db, get_engine, get_redis_client, test_redis_connection
 from .models import PriceHistory, NewsItem, Stock
 from .fetch_price import fetch_and_store_prices
-from .sentiment import compute_sentiment_for_news
-from .predict import generate_prediction_from_sentiment
 from .crawlers.manager import CrawlerManager
 from .analyzers.sentiment_analyzer import NewsSegmentAnalyzer, DailySentimentAggregator
 from .analyzers.technical_analyzer import TechnicalAnalysisReport, TechnicalIndicatorCalculator
 from .predictors.ensemble_predictor import PredictionEnsembler
 import pandas as pd
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +26,6 @@ logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
-logger = logging.getLogger(__name__)
 
 # 全局爬虫管理器
 crawler_manager = None
@@ -272,23 +268,20 @@ def get_history(code: str, start: Optional[str] = None, end: Optional[str] = Non
         }
 
 
-# ==================== 情感分析接口 ====================
-
-@app.post("/admin/sentiment/{code}")
-def admin_sentiment(code: str):
-    """计算新闻情感分数"""
-    count = compute_sentiment_for_news(code, engine)
-    return {"processed": count}
-
+# ==================== 情感分析接口（已过时，保留用于兼容性）====================
 
 @app.get("/sentiment/{code}")
 def get_sentiment(code: str):
-    """获取情感分析结果"""
+    """
+    获取情感分析结果
+    
+    注意：此端点已过时，建议使用 /analyze/sentiment 获取更详细的分析结果
+    """
     with Session(engine) as session:
         results = session.exec(
             select(NewsItem).where(
                 NewsItem.stock_code == code,
-                NewsItem.sentiment_score != None
+                NewsItem.sentiment_score is not None
             )
         ).all()
 
@@ -296,21 +289,6 @@ def get_sentiment(code: str):
             "data": [r.dict() for r in results],
             "count": len(results)
         }
-
-
-# ==================== 预测接口 ====================
-
-@app.post("/admin/predict/{code}")
-def admin_predict(code: str):
-    """生成预测信号"""
-    result = generate_prediction_from_sentiment(code, engine)
-    return result
-
-
-@app.get("/prediction/{code}")
-def get_prediction(code: str, window: int = 30, alpha: float = 0.01):
-    """获取预测结果"""
-    return {"code": code, "window": window, "alpha": alpha}
 
 
 # ==================== 【新增】情感分析端点 ====================
@@ -451,7 +429,7 @@ async def generate_prediction_signal(
     use_technical: bool = True
 ):
     """
-    ✏️ 【新端点】生成综合预测信号
+    【新端点】生成综合预测信号
     
     【说明】：
     - 融合情感分析和技术指标
