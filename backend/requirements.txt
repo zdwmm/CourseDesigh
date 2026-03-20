@@ -1,4 +1,5 @@
-# backend/requirements.txt
+# ✏️ 【修改文件】backend/requirements.txt
+
 fastapi==0.95.2
 uvicorn[standard]==0.22.0
 sqlmodel==0.0.8
@@ -7,6 +8,8 @@ pandas==2.0.3
 requests==2.31.0
 python-multipart==0.0.6
 python-dotenv==1.0.0
+
+# 现有依赖
 vaderSentiment==3.3.2
 snownlp==0.12.3
 
@@ -14,13 +17,28 @@ snownlp==0.12.3
 pymysql==1.1.0
 cryptography==41.0.7
 
-# Redis 缓存与消息队列
+# Redis 缓存
 redis==5.0.0
 
-# 异步爬虫依赖
+# 异步爬虫
 aiohttp==3.9.0
 lxml==4.9.3
-asyncio-contextmanager==1.0.0
+
+# ========== 新增：预测模块依赖 ==========
+# 时序预测
+statsmodels==0.14.0
+
+# 机器学习
+scikit-learn==1.3.2
+xgboost==2.0.0
+
+# 技术指标计算
+ta==0.10.2
+
+# 可视化（可选，用于生成图表）
+matplotlib==3.8.1
+seaborn==0.12.2
 
 # 其他工具
 python-dateutil==2.8.2
+numpy==1.24.3
