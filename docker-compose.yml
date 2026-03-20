@@ -1,14 +1,40 @@
+# docker-compose.yml
 version: '3.8'
+
 services:
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    volumes:
-      - ./backend/data:/app/data
-      - ./backend/app:/app/app
-    ports:
-      - "8000:8000"
+  mysql:
+    image: mysql:8.0
     environment:
-      - NEWSAPI_KEY=${NEWSAPI_KEY:-}
-      - DATABASE_URL=sqlite:///./data.db
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: stock_analysis
+      TZ: 'Asia/Shanghai'
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - stock_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - stock_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mysql_data:
+
+networks:
+  stock_network:
+    driver: bridge
