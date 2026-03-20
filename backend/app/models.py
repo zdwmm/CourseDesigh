@@ -1,3 +1,4 @@
+# backend/app/models.py
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -18,6 +19,7 @@ class Stock(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     prices: list["PriceHistory"] = Relationship(back_populates="stock")
+    news: list["NewsItem"] = Relationship(back_populates="stock")
 
 
 class PriceHistory(SQLModel, table=True):
@@ -39,15 +41,20 @@ class PriceHistory(SQLModel, table=True):
 
 
 class NewsItem(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("stock_code", "title", "published_at", name="uix_stock_title_date"),)
+
     id: Optional[int] = Field(default=None, primary_key=True)
+    stock_id: Optional[int] = Field(default=None, foreign_key="stock.id")
     stock_code: str = Field(index=True, nullable=False, max_length=32)
-    title: str = Field(nullable=False)
-    url: Optional[str] = None
-    published_at: Optional[date] = Field(index=True)
+    title: str = Field(nullable=False, max_length=500)
+    url: Optional[str] = Field(default=None, max_length=512)
+    published_at: datetime = Field(index=True)  # 改为 datetime 以支持秒级精度
     content: Optional[str] = None
-    source: Optional[str] = None
+    source: str = Field(default="unknown", max_length=50)  # 新闻来源标记
     sentiment_score: Optional[float] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    stock: Optional["Stock"] = Relationship(back_populates="news")
 
 
 class ModelVersion(SQLModel, table=True):
