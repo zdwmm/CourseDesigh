@@ -1,5 +1,3 @@
-# ✏️ 【修改文件】backend/requirements.txt
-
 fastapi==0.95.2
 uvicorn[standard]==0.22.0
 sqlmodel==0.0.8

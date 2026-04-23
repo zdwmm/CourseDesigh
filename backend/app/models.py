@@ -1,12 +1,14 @@
 # backend/app/models.py
 from __future__ import annotations
 
+from sqlalchemy import Column
 from datetime import date, datetime
 from typing import Optional
+from sqlalchemy import Column as SAColumn
 
 from sqlalchemy import UniqueConstraint, Index
 from sqlmodel import Field, Relationship, SQLModel
-
+from sqlalchemy.types import Text
 
 class Stock(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -49,7 +51,9 @@ class NewsItem(SQLModel, table=True):
     title: str = Field(nullable=False, max_length=500)
     url: Optional[str] = Field(default=None, max_length=512)
     published_at: datetime = Field(index=True)  # 改为 datetime 以支持秒级精度
-    content: Optional[str] = None
+    #content: Optional[str] = None #爬取的新闻content过长时，会出现"Data too long for column 'content' at row 1"报错
+
+    content: Optional[str] = Field(default=None, sa_column=SAColumn(Text))
     source: str = Field(default="unknown", max_length=50)  # 新闻来源标记
     sentiment_score: Optional[float] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
